@@ -2,8 +2,9 @@
 
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { createClient as createLinkClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
-import { isSupabaseConfigured } from "@/lib/supabase/env";
+import { SUPABASE_KEY, SUPABASE_URL, isSupabaseConfigured } from "@/lib/supabase/env";
 import { SetupNotice } from "@/components/SetupNotice";
 
 const SMS_ENABLED = process.env.NEXT_PUBLIC_ENABLE_SMS_LOGIN === "true";
@@ -13,6 +14,17 @@ function toE164(phone: string): string {
   if (digits.length === 10) return `+1${digits}`;
   if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
   return `+${digits}`;
+}
+
+/**
+ * Sends the email with a link that works on any device (implicit flow).
+ * The app's main client uses PKCE, which ties links to the requesting browser.
+ */
+function sendEmailLink(email: string, redirectTo: string) {
+  const linkClient = createLinkClient(SUPABASE_URL, SUPABASE_KEY, {
+    auth: { flowType: "implicit", persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  });
+  return linkClient.auth.signInWithOtp({ email, options: { shouldCreateUser: true, emailRedirectTo: redirectTo } });
 }
 
 function LoginForm() {
@@ -27,7 +39,7 @@ function LoginForm() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(
     params.get("error") === "link"
-      ? "That sign-in link has expired or was opened in a different browser. Send yourself a new one."
+      ? "That sign-in link has expired or was already used. Send yourself a new one."
       : null,
   );
 
@@ -39,16 +51,17 @@ function LoginForm() {
     setError(null);
     const { error } =
       method === "email"
-        ? await supabase.auth.signInWithOtp({
-            email: value.trim(),
-            options: {
-              shouldCreateUser: true,
-              emailRedirectTo: `${window.location.origin}/auth/confirm?next=${encodeURIComponent(next)}`,
-            },
-          })
+        ? await sendEmailLink(
+            value.trim(),
+            `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+          )
         : await supabase.auth.signInWithOtp({ phone: toE164(value), options: { shouldCreateUser: true } });
     setBusy(false);
     if (error) {
+      if (error.status === 429) {
+        setError("We just sent you an email. Wait a minute before asking for another one, and check your spam folder.");
+        return;
+      }
       setError(
         method === "email"
           ? "We couldn't send a code to that email. Check the address and try again."

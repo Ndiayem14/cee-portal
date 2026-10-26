@@ -1,0 +1,285 @@
+From 833f98c9d75acfa2e30d86e26e203fd48211bbeb Mon Sep 17 00:00:00 2001
+From: Moustapha <mabsand99@gmail.com>
+Date: Mon, 26 Oct 2026 11:35:35 -0400
+Subject: [PATCH 1/3] Ignore browser-extension changes to the html tag
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01CNQdKVBTMS4GREAAWfZALv
+---
+ src/app/layout.tsx | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/app/layout.tsx b/src/app/layout.tsx
+index 49d27dd..45ff28a 100644
+--- a/src/app/layout.tsx
++++ b/src/app/layout.tsx
+@@ -33,7 +33,7 @@ export const viewport: Viewport = {
+ 
+ export default function RootLayout({ children }: LayoutProps<"/">) {
+   return (
+-    <html lang="en" className={`${body.variable} ${heading.variable} antialiased`}>
++    <html lang="en" className={`${body.variable} ${heading.variable} antialiased`} suppressHydrationWarning>
+       <body className="flex min-h-dvh flex-col">
+         <a
+           href="#main"
+-- 
+2.43.0
+
+
+From 881793d8efead93d36b2e3c51f73c00a58838c6f Mon Sep 17 00:00:00 2001
+From: Moustapha <mabsand99@gmail.com>
+Date: Mon, 26 Oct 2026 12:13:25 -0400
+Subject: [PATCH 2/3] Lock down internal database functions; add signed-out
+ visitor tests
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01CNQdKVBTMS4GREAAWfZALv
+---
+ .../migrations/0002_lock_down_functions.sql   | 43 +++++++++++++++++++
+ supabase/tests/00_mock_supabase.sql           |  2 +-
+ supabase/tests/rls_test.py                    | 18 ++++++++
+ 3 files changed, 62 insertions(+), 1 deletion(-)
+ create mode 100644 supabase/migrations/0002_lock_down_functions.sql
+
+diff --git a/supabase/migrations/0002_lock_down_functions.sql b/supabase/migrations/0002_lock_down_functions.sql
+new file mode 100644
+index 0000000..6ae1faa
+--- /dev/null
++++ b/supabase/migrations/0002_lock_down_functions.sql
+@@ -0,0 +1,43 @@
++-- Lock down internal functions (Supabase security advisor: SECURITY DEFINER functions callable by anon).
++--
++-- 1. All policies on our tables apply to signed-in users only, so signed-out visitors
++--    never touch them (they're denied by default with RLS on).
++-- 2. Trigger functions can't be called by anyone through the API.
++--    (Triggers still run: Postgres doesn't check the caller's EXECUTE right for trigger functions.)
++-- 3. Helper functions used inside policies can only be called by signed-in users.
++
++do $$
++declare p record;
++begin
++  for p in
++    select policyname, tablename from pg_policies
++    where schemaname = 'public'
++      and tablename in ('profiles', 'applications', 'address_history', 'documents',
++                        'info_requests', 'review_notes', 'audit_log')
++  loop
++    execute format('alter policy %I on public.%I to authenticated', p.policyname, p.tablename);
++  end loop;
++end $$;
++
++revoke execute on function
++  public.handle_new_user(),
++  public.applications_guard(),
++  public.applications_insert_guard(),
++  public.resolve_info_requests()
++from public, anon, authenticated;
++
++revoke execute on function
++  public.is_staff(),
++  public.is_admin(),
++  public.my_role(),
++  public.can_edit_application(uuid),
++  public.owns_application(uuid)
++from public, anon;
++
++grant execute on function
++  public.is_staff(),
++  public.is_admin(),
++  public.my_role(),
++  public.can_edit_application(uuid),
++  public.owns_application(uuid)
++to authenticated;
+diff --git a/supabase/tests/00_mock_supabase.sql b/supabase/tests/00_mock_supabase.sql
+index ede9f52..d85a10f 100644
+--- a/supabase/tests/00_mock_supabase.sql
++++ b/supabase/tests/00_mock_supabase.sql
+@@ -15,7 +15,7 @@ create function storage.foldername(name text) returns text[] language sql immuta
+   select (string_to_array(name, '/'))[1:array_length(string_to_array(name, '/'),1)-1] $$;
+ grant usage on schema public, auth, storage to anon, authenticated;
+ grant execute on all functions in schema auth to anon, authenticated;
+-grant all on storage.objects to authenticated;
++grant all on storage.objects to anon, authenticated;
+ alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
+ alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
+ alter default privileges in schema public grant execute on functions to anon, authenticated, service_role;
+diff --git a/supabase/tests/rls_test.py b/supabase/tests/rls_test.py
+index 368caa2..3090634 100644
+--- a/supabase/tests/rls_test.py
++++ b/supabase/tests/rls_test.py
+@@ -28,6 +28,19 @@ def as_user(uid, aal="aal1"):
+                 raise
+     return run
+ 
++def as_anon(sql, *args):
++    with conn.cursor() as c:
++        c.execute("begin")
++        try:
++            c.execute("set local role anon")
++            c.execute(sql, args)
++            rows = c.fetchall() if c.description else c.rowcount
++            c.execute("commit")
++            return rows
++        except Exception:
++            c.execute("rollback")
++            raise
++
+ def check(name, fn, expect_error=False):
+     try:
+         out = fn()
+@@ -117,6 +130,11 @@ check("decided_at and reviewer recorded",
+ check("applicant cannot change role to admin", lambda: a("update profiles set role='admin' where id=%s", A) == 0)
+ check("is_staff() false for applicant", lambda: a("select public.is_staff()")[0][0] is False)
+ 
++check("signed-out visitor sees no applications", lambda: as_anon("select * from applications") == [])
++check("signed-out visitor sees no files", lambda: as_anon("select * from storage.objects") == [])
++check("signed-out visitor cannot call is_staff()", lambda: as_anon("select public.is_staff()"), expect_error=True)
++check("nobody can call trigger functions directly", lambda: a("select public.handle_new_user()"), expect_error=True)
++
+ passed = sum(ok for ok, *_ in results)
+ for ok, name, why in results:
+     print(("PASS " if ok else "FAIL ") + name + (f"  -> {why}" if why else ""))
+-- 
+2.43.0
+
+
+From b80fde8fe55a8b284be4f4e290ca55640d2d9641 Mon Sep 17 00:00:00 2001
+From: Moustapha <mabsand99@gmail.com>
+Date: Mon, 26 Oct 2026 12:36:48 -0400
+Subject: [PATCH 3/3] Sign in with the link in Supabase's default email
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01CNQdKVBTMS4GREAAWfZALv
+---
+ src/app/(site)/login/page.tsx | 34 ++++++++++++++++++++++++++--------
+ src/app/auth/confirm/route.ts | 28 ++++++++++++++++++++++++++++
+ 2 files changed, 54 insertions(+), 8 deletions(-)
+ create mode 100644 src/app/auth/confirm/route.ts
+
+diff --git a/src/app/(site)/login/page.tsx b/src/app/(site)/login/page.tsx
+index 77a4867..eabd826 100644
+--- a/src/app/(site)/login/page.tsx
++++ b/src/app/(site)/login/page.tsx
+@@ -25,7 +25,11 @@ function LoginForm() {
+   const [code, setCode] = useState("");
+   const [stage, setStage] = useState<"enter" | "verify">("enter");
+   const [busy, setBusy] = useState(false);
+-  const [error, setError] = useState<string | null>(null);
++  const [error, setError] = useState<string | null>(
++    params.get("error") === "link"
++      ? "That sign-in link has expired or was opened in a different browser. Send yourself a new one."
++      : null,
++  );
+ 
+   const supabase = createClient();
+ 
+@@ -35,7 +39,13 @@ function LoginForm() {
+     setError(null);
+     const { error } =
+       method === "email"
+-        ? await supabase.auth.signInWithOtp({ email: value.trim(), options: { shouldCreateUser: true } })
++        ? await supabase.auth.signInWithOtp({
++            email: value.trim(),
++            options: {
++              shouldCreateUser: true,
++              emailRedirectTo: `${window.location.origin}/auth/confirm?next=${encodeURIComponent(next)}`,
++            },
++          })
+         : await supabase.auth.signInWithOtp({ phone: toE164(value), options: { shouldCreateUser: true } });
+     setBusy(false);
+     if (error) {
+@@ -70,7 +80,7 @@ function LoginForm() {
+     <div className="mx-auto max-w-md px-4 py-14 sm:px-6">
+       <h1 className="text-4xl font-extrabold text-oak">Sign in</h1>
+       <p className="mt-3 text-lg text-muted">
+-        No password needed. We&rsquo;ll send you a 6-digit code. New here? This also creates your account.
++        No password needed. We&rsquo;ll send you a sign-in email. New here? This also creates your account.
+       </p>
+ 
+       {stage === "enter" ? (
+@@ -109,19 +119,28 @@ function LoginForm() {
+           </label>
+           {error && <p role="alert" className="rounded-lg bg-alert-wash p-3 text-alert">{error}</p>}
+           <button className="btn btn-primary w-full" disabled={busy || !value}>
+-            {busy ? "Sending…" : "Send my code"}
++            {busy ? "Sending…" : method === "email" ? "Email me a sign-in link" : "Text me a code"}
+           </button>
+         </form>
+       ) : (
+         <form onSubmit={verify} className="mt-8 space-y-5">
+           <p>
+-            We sent a code to <strong>{value}</strong>.{" "}
++            {method === "email" ? (
++              <>
++                Check your email at <strong>{value}</strong>. Click the sign-in link in the email, or enter the code
++                if the email shows one.{" "}
++              </>
++            ) : (
++              <>
++                We sent a code to <strong>{value}</strong>.{" "}
++              </>
++            )}
+             <button type="button" className="font-bold text-leaf underline" onClick={() => setStage("enter")}>
+               Change
+             </button>
+           </p>
+           <label className="block">
+-            <span className="field-label">6-digit code</span>
++            <span className="field-label">Code from the email</span>
+             <input
+               className="input text-center font-display text-2xl tracking-[0.4em]"
+               inputMode="numeric"
+@@ -129,7 +148,6 @@ function LoginForm() {
+               pattern="[0-9]{6,8}"
+               maxLength={8}
+               required
+-              autoFocus
+               value={code}
+               onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+             />
+@@ -139,7 +157,7 @@ function LoginForm() {
+             {busy ? "Checking…" : "Sign in"}
+           </button>
+           <button type="button" className="btn btn-quiet w-full" disabled={busy} onClick={sendCode}>
+-            Send a new code
++            Send again
+           </button>
+         </form>
+       )}
+diff --git a/src/app/auth/confirm/route.ts b/src/app/auth/confirm/route.ts
+new file mode 100644
+index 0000000..630802f
+--- /dev/null
++++ b/src/app/auth/confirm/route.ts
+@@ -0,0 +1,28 @@
++import { NextResponse, type NextRequest } from "next/server";
++import type { EmailOtpType } from "@supabase/supabase-js";
++import { createClient } from "@/lib/supabase/server";
++
++/**
++ * Where the sign-in link in the email lands. Supports both link styles Supabase uses:
++ * ?code=... (default templates) and ?token_hash=...&type=... (custom templates).
++ */
++export async function GET(request: NextRequest) {
++  const url = request.nextUrl;
++  const nextParam = url.searchParams.get("next") ?? "/apply";
++  const next = nextParam.startsWith("/") && !nextParam.startsWith("//") ? nextParam : "/apply";
++
++  const supabase = await createClient();
++  const code = url.searchParams.get("code");
++  const tokenHash = url.searchParams.get("token_hash");
++  const type = url.searchParams.get("type") as EmailOtpType | null;
++
++  let ok = false;
++  if (code) {
++    ok = !(await supabase.auth.exchangeCodeForSession(code)).error;
++  } else if (tokenHash && type) {
++    ok = !(await supabase.auth.verifyOtp({ token_hash: tokenHash, type })).error;
++  }
++
++  const dest = new URL(ok ? next : `/login?error=link&next=${encodeURIComponent(next)}`, request.url);
++  return NextResponse.redirect(dest, { status: 303 });
++}
+-- 
+2.43.0
+
