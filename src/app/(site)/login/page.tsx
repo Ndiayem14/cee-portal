@@ -25,7 +25,11 @@ function LoginForm() {
   const [code, setCode] = useState("");
   const [stage, setStage] = useState<"enter" | "verify">("enter");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(
+    params.get("error") === "link"
+      ? "That sign-in link has expired or was opened in a different browser. Send yourself a new one."
+      : null,
+  );
 
   const supabase = createClient();
 
@@ -35,7 +39,13 @@ function LoginForm() {
     setError(null);
     const { error } =
       method === "email"
-        ? await supabase.auth.signInWithOtp({ email: value.trim(), options: { shouldCreateUser: true } })
+        ? await supabase.auth.signInWithOtp({
+            email: value.trim(),
+            options: {
+              shouldCreateUser: true,
+              emailRedirectTo: `${window.location.origin}/auth/confirm?next=${encodeURIComponent(next)}`,
+            },
+          })
         : await supabase.auth.signInWithOtp({ phone: toE164(value), options: { shouldCreateUser: true } });
     setBusy(false);
     if (error) {
@@ -70,7 +80,7 @@ function LoginForm() {
     <div className="mx-auto max-w-md px-4 py-14 sm:px-6">
       <h1 className="text-4xl font-extrabold text-oak">Sign in</h1>
       <p className="mt-3 text-lg text-muted">
-        No password needed. We&rsquo;ll send you a 6-digit code. New here? This also creates your account.
+        No password needed. We&rsquo;ll send you a sign-in email. New here? This also creates your account.
       </p>
 
       {stage === "enter" ? (
@@ -109,19 +119,28 @@ function LoginForm() {
           </label>
           {error && <p role="alert" className="rounded-lg bg-alert-wash p-3 text-alert">{error}</p>}
           <button className="btn btn-primary w-full" disabled={busy || !value}>
-            {busy ? "Sending…" : "Send my code"}
+            {busy ? "Sending…" : method === "email" ? "Email me a sign-in link" : "Text me a code"}
           </button>
         </form>
       ) : (
         <form onSubmit={verify} className="mt-8 space-y-5">
           <p>
-            We sent a code to <strong>{value}</strong>.{" "}
+            {method === "email" ? (
+              <>
+                Check your email at <strong>{value}</strong>. Click the sign-in link in the email, or enter the code
+                if the email shows one.{" "}
+              </>
+            ) : (
+              <>
+                We sent a code to <strong>{value}</strong>.{" "}
+              </>
+            )}
             <button type="button" className="font-bold text-leaf underline" onClick={() => setStage("enter")}>
               Change
             </button>
           </p>
           <label className="block">
-            <span className="field-label">6-digit code</span>
+            <span className="field-label">Code from the email</span>
             <input
               className="input text-center font-display text-2xl tracking-[0.4em]"
               inputMode="numeric"
@@ -129,7 +148,6 @@ function LoginForm() {
               pattern="[0-9]{6,8}"
               maxLength={8}
               required
-              autoFocus
               value={code}
               onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
             />
@@ -139,7 +157,7 @@ function LoginForm() {
             {busy ? "Checking…" : "Sign in"}
           </button>
           <button type="button" className="btn btn-quiet w-full" disabled={busy} onClick={sendCode}>
-            Send a new code
+            Send again
           </button>
         </form>
       )}
