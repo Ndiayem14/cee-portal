@@ -1,0 +1,169 @@
+@import "tailwindcss";
+
+/*
+  Palette drawn from the trees the place is named for.
+  oak    – deep canopy green, the brand anchor
+  leaf   – Sycamore & Oak's kelly green, for actions and progress
+  bark   – pale, cool sycamore-bark grey-green, the page ground
+  sun    – late-afternoon gold, used only for "still needed" states
+*/
+@theme {
+  --color-oak: #17402f;
+  --color-oak-soft: #24573f;
+  --color-leaf: #1e7a4c;
+  --color-leaf-bright: #2f9a62;
+  --color-leaf-wash: #dcefe2;
+  --color-bark: #eef1ec;
+  --color-bark-deep: #dfe5dc;
+  --color-ink: #16201b;
+  --color-muted: #55635b;
+  --color-line: #c9d3cc;
+  --color-sun: #e3a823;
+  --color-sun-wash: #fbf0d3;
+  --color-alert: #b3261e;
+  --color-alert-wash: #fbe6e4;
+
+  --font-sans: var(--font-body);
+  --font-display: var(--font-heading);
+}
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--color-bark);
+  color: var(--color-ink);
+  font-family: var(--font-body), system-ui, sans-serif;
+  font-size: 1.0625rem;
+  line-height: 1.6;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-heading), system-ui, sans-serif;
+  letter-spacing: -0.015em;
+  line-height: 1.1;
+  text-wrap: balance;
+}
+
+p {
+  text-wrap: pretty;
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-sun);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Long-form reading pages */
+.prose-cee {
+  max-width: 68ch;
+}
+.prose-cee h2 {
+  font-size: 1.6rem;
+  font-weight: 700;
+  margin-top: 2.5rem;
+  margin-bottom: 0.75rem;
+  color: var(--color-oak);
+}
+.prose-cee h3 {
+  font-size: 1.2rem;
+  font-weight: 700;
+  margin-top: 1.75rem;
+  margin-bottom: 0.4rem;
+}
+.prose-cee p + p {
+  margin-top: 1rem;
+}
+.prose-cee ul {
+  list-style: disc;
+  padding-left: 1.25rem;
+  margin-top: 0.75rem;
+}
+.prose-cee li + li {
+  margin-top: 0.4rem;
+}
+.prose-cee a {
+  color: var(--color-leaf);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Form controls */
+.field-label {
+  display: block;
+  font-weight: 700;
+  margin-bottom: 0.35rem;
+}
+.field-hint {
+  display: block;
+  color: var(--color-muted);
+  font-size: 0.95rem;
+  margin-top: -0.15rem;
+  margin-bottom: 0.45rem;
+}
+.input {
+  width: 100%;
+  border: 2px solid var(--color-line);
+  background: white;
+  border-radius: 10px;
+  padding: 0.7rem 0.85rem;
+  font-size: 1.0625rem;
+  min-height: 3rem;
+}
+.input:focus {
+  border-color: var(--color-leaf);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--color-leaf-wash);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 3rem;
+  padding: 0.7rem 1.4rem;
+  border-radius: 999px;
+  font-weight: 700;
+  transition: background-color 120ms ease;
+}
+.btn-primary {
+  background: var(--color-leaf);
+  color: white;
+}
+.btn-primary:hover {
+  background: var(--color-oak-soft);
+}
+.btn-primary:disabled {
+  background: var(--color-line);
+  color: var(--color-muted);
+  cursor: not-allowed;
+}
+.btn-quiet {
+  color: var(--color-oak);
+  border: 2px solid var(--color-line);
+  background: white;
+}
+.btn-quiet:hover {
+  border-color: var(--color-oak);
+}
+.btn-danger {
+  color: var(--color-alert);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
