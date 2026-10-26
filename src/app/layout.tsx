@@ -33,7 +33,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${body.variable} ${heading.variable} antialiased`}>
+    <html lang="en" className={`${body.variable} ${heading.variable} antialiased`} suppressHydrationWarning>
       <body className="flex min-h-dvh flex-col">
         <a
           href="#main"
