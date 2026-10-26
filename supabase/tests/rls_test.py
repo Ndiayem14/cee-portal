@@ -28,6 +28,19 @@ def as_user(uid, aal="aal1"):
                 raise
     return run
 
+def as_anon(sql, *args):
+    with conn.cursor() as c:
+        c.execute("begin")
+        try:
+            c.execute("set local role anon")
+            c.execute(sql, args)
+            rows = c.fetchall() if c.description else c.rowcount
+            c.execute("commit")
+            return rows
+        except Exception:
+            c.execute("rollback")
+            raise
+
 def check(name, fn, expect_error=False):
     try:
         out = fn()
@@ -116,6 +129,11 @@ check("decided_at and reviewer recorded",
       lambda: admin("select decided_at is not null and reviewer_id = %s from applications where id=%s", R, APP)[0][0])
 check("applicant cannot change role to admin", lambda: a("update profiles set role='admin' where id=%s", A) == 0)
 check("is_staff() false for applicant", lambda: a("select public.is_staff()")[0][0] is False)
+
+check("signed-out visitor sees no applications", lambda: as_anon("select * from applications") == [])
+check("signed-out visitor sees no files", lambda: as_anon("select * from storage.objects") == [])
+check("signed-out visitor cannot call is_staff()", lambda: as_anon("select public.is_staff()"), expect_error=True)
+check("nobody can call trigger functions directly", lambda: a("select public.handle_new_user()"), expect_error=True)
 
 passed = sum(ok for ok, *_ in results)
 for ok, name, why in results:
